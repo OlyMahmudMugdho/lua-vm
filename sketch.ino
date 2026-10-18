@@ -9,27 +9,20 @@
 
 #include <stdlib.h>
 
-// --------------------------------------------------
-// Raspberry Pi Pico W - SPI0 SD card connections
-// --------------------------------------------------
-
+// Raspberry Pi Pico W SPI0 pins
 static constexpr uint8_t SD_CS_PIN   = 17;
 static constexpr uint8_t SD_SCK_PIN  = 18;
 static constexpr uint8_t SD_MOSI_PIN = 19;
 static constexpr uint8_t SD_MISO_PIN = 16;
 
-// Maximum bytecode file size, not a guarantee that
-// a program of this size can execute within available RAM.
+// Maximum permitted bytecode file size.
+// Actual executable size is limited by available RAM.
 static constexpr size_t MAX_CHUNK_SIZE = 96 * 1024;
-
 static constexpr char PROGRAM_PATH[] = "/main.luac";
 
 static lua_State *vm = nullptr;
 
-// --------------------------------------------------
-// Lua print() -> USB Serial
-// --------------------------------------------------
-
+// Print Lua values to USB Serial.
 static int luaSerialPrint(lua_State *L) {
     const int count = lua_gettop(L);
 
@@ -55,10 +48,7 @@ static int luaSerialPrint(lua_State *L) {
     return 0;
 }
 
-// --------------------------------------------------
-// Initialize selected Lua libraries
-// --------------------------------------------------
-
+// Register only the libraries needed for the MVP.
 static void registerLibrary(
     lua_State *L,
     const char *name,
@@ -76,15 +66,11 @@ static void initializeLuaLibraries(lua_State *L) {
     registerLibrary(L, LUA_UTF8LIBNAME, luaopen_utf8);
     registerLibrary(L, LUA_COLIBNAME, luaopen_coroutine);
 
-    // Use USB Serial instead of the default Lua print().
     lua_pushcfunction(L, luaSerialPrint);
     lua_setglobal(L, "print");
 }
 
-// --------------------------------------------------
-// SD card initialization
-// --------------------------------------------------
-
+// Initialize SD using SPI0.
 static bool initializeSD() {
     SPI.setRX(SD_MISO_PIN);
     SPI.setTX(SD_MOSI_PIN);
@@ -100,15 +86,12 @@ static bool initializeSD() {
     return true;
 }
 
-// --------------------------------------------------
-// Read and execute a precompiled Lua binary
-// --------------------------------------------------
-
+// Load a bytecode file and execute it.
 static bool executeProgram(const char *path) {
     File file = SD.open(path, FILE_READ);
 
     if (!file) {
-        Serial.print("[VM] Cannot open: ");
+        Serial.print("[VM] Cannot open ");
         Serial.println(path);
         return false;
     }
@@ -116,7 +99,7 @@ static bool executeProgram(const char *path) {
     const size_t fileSize = file.size();
 
     if (fileSize == 0 || fileSize > MAX_CHUNK_SIZE) {
-        Serial.print("[VM] Invalid file size: ");
+        Serial.print("[VM] Invalid bytecode size: ");
         Serial.println(fileSize);
         file.close();
         return false;
@@ -126,7 +109,7 @@ static bool executeProgram(const char *path) {
         static_cast<uint8_t *>(malloc(fileSize));
 
     if (buffer == nullptr) {
-        Serial.println("[VM] Bytecode allocation failed.");
+        Serial.println("[VM] Not enough RAM for bytecode.");
         file.close();
         return false;
     }
@@ -134,20 +117,20 @@ static bool executeProgram(const char *path) {
     size_t bytesRead = 0;
 
     while (bytesRead < fileSize) {
-        const int result =
+        const int count =
             file.read(buffer + bytesRead, fileSize - bytesRead);
 
-        if (result <= 0) {
+        if (count <= 0) {
             break;
         }
 
-        bytesRead += static_cast<size_t>(result);
+        bytesRead += static_cast<size_t>(count);
     }
 
     file.close();
 
     if (bytesRead != fileSize) {
-        Serial.println("[SD] Incomplete file read.");
+        Serial.println("[SD] Incomplete read.");
         free(buffer);
         return false;
     }
@@ -158,7 +141,7 @@ static bool executeProgram(const char *path) {
     Serial.print(fileSize);
     Serial.println(" bytes)");
 
-    // Binary-only mode: reject source text.
+    // Accept binary chunks only.
     const int loadStatus = luaL_loadbufferx(
         vm,
         reinterpret_cast<const char *>(buffer),
@@ -181,12 +164,7 @@ static bool executeProgram(const char *path) {
 
     Serial.println("[VM] Executing...");
 
-    const int runStatus = lua_pcall(
-        vm,
-        0,
-        LUA_MULTRET,
-        0
-    );
+    const int runStatus = lua_pcall(vm, 0, LUA_MULTRET, 0);
 
     if (runStatus != LUA_OK) {
         const char *message = lua_tostring(vm, -1);
@@ -199,17 +177,12 @@ static bool executeProgram(const char *path) {
         return false;
     }
 
-    // Discard any return values from the executed chunk.
     lua_settop(vm, 0);
     lua_gc(vm, LUA_GCCOLLECT);
 
     Serial.println("[VM] Execution finished.");
     return true;
 }
-
-// --------------------------------------------------
-// Arduino entry points
-// --------------------------------------------------
 
 void setup() {
     Serial.begin(115200);
@@ -220,14 +193,14 @@ void setup() {
     Serial.println("===================");
 
     if (!initializeSD()) {
-        Serial.println("[BOOT] Check card, format and wiring.");
+        Serial.println("[BOOT] Check SD card, FAT format and wiring.");
         return;
     }
 
     vm = luaL_newstate();
 
     if (vm == nullptr) {
-        Serial.println("[VM] Failed to create Lua state.");
+        Serial.println("[VM] Failed to allocate Lua state.");
         return;
     }
 
@@ -236,11 +209,11 @@ void setup() {
     Serial.println("[BOOT] Lua VM initialized.");
 
     if (!executeProgram(PROGRAM_PATH)) {
-        Serial.println("[BOOT] Program failed.");
+        Serial.println("[BOOT] Program execution failed.");
     }
 }
 
 void loop() {
-    // MVP: run one program at boot.
+    // MVP: execute one Lua binary at boot.
     delay(1000);
 }
