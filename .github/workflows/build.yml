@@ -30,7 +30,7 @@ jobs:
             https://github.com/earlephilhower/arduino-pico/releases/download/global/package_rp2040_index.json
           arduino-cli core update-index
 
-      - name: Install Pico W Board Core
+      - name: Install Raspberry Pi Pico W Core
         run: |
           arduino-cli core install rp2040:rp2040
 
@@ -48,44 +48,41 @@ jobs:
           test -f src/lua/lvm.c
           test -f src/lua/lundump.c
 
-          echo "Sketch and Lua source files found."
+          echo "Lua source files verified."
 
-      - name: Prepare Arduino Sketch
+      - name: Prepare Sketch
         run: |
           set -eu
 
-          mkdir -p ./sketch ./artifact
-          cp ./sketch.ino ./sketch/sketch.ino
+          mkdir -p sketch artifact
+          cp sketch.ino sketch/sketch.ino
 
-          mkdir -p ./sketch/src/lua
-          cp -r ./src/lua/. ./sketch/src/lua/
+          mkdir -p sketch/src/lua
+          cp -r src/lua/. sketch/src/lua/
 
-          # These are desktop command-line programs, not VM sources.
-          rm -f ./sketch/src/lua/lua.c
-          rm -f ./sketch/src/lua/luac.c
-
-          # The official Lua makefile is not needed by Arduino.
-          rm -f ./sketch/src/lua/Makefile
-
-          echo "Staged files:"
-          find ./sketch -maxdepth 3 -type f | sort
+          rm -f sketch/src/lua/lua.c
+          rm -f sketch/src/lua/luac.c
+          rm -f sketch/src/lua/Makefile
 
       - name: Compile Pico W Firmware
         run: |
           arduino-cli compile \
             --fqbn rp2040:rp2040:rpipicow \
+            --build-property "compiler.c.extra_flags=-DLUA_32BITS" \
+            --build-property "compiler.cpp.extra_flags=-DLUA_32BITS" \
             --output-dir ./artifact \
             ./sketch
 
-      - name: Show Firmware Artifacts
+      - name: Verify Firmware Output
         run: |
-          ls -lah ./artifact
-          test -n "$(find ./artifact -type f -print -quit)"
+          set -eu
+          ls -lah artifact
+          test -n "$(find artifact -type f -print -quit)"
 
-      - name: Upload Firmware
+      - name: Upload Firmware Artifact
         uses: actions/upload-artifact@v4
         with:
           name: pico-w-lua-vm-firmware
-          path: ./artifact/**
+          path: artifact/**
           if-no-files-found: error
           retention-days: 14
