@@ -1,5 +1,5 @@
 
-name: Compile Pico W Lua VM
+name: Build Pico W Lua VM
 
 on:
   push:
@@ -8,8 +8,12 @@ on:
     branches: ["main"]
   workflow_dispatch:
 
+permissions:
+  contents: read
+
 jobs:
   build:
+    name: Compile Raspberry Pi Pico W
     runs-on: ubuntu-latest
 
     steps:
@@ -26,36 +30,62 @@ jobs:
             https://github.com/earlephilhower/arduino-pico/releases/download/global/package_rp2040_index.json
           arduino-cli core update-index
 
-      - name: Install Raspberry Pi Pico Core
+      - name: Install Pico W Board Core
         run: |
           arduino-cli core install rp2040:rp2040
 
-      - name: Install SD Library
+      - name: Verify Lua Source Files
         run: |
-          arduino-cli lib install SD
+          set -eu
 
-      - name: Prepare Sketch
+          test -f sketch.ino
+          test -f src/lua/lua.h
+          test -f src/lua/lauxlib.h
+          test -f src/lua/lualib.h
+          test -f src/lua/luaconf.h
+          test -f src/lua/lapi.c
+          test -f src/lua/lstate.c
+          test -f src/lua/lvm.c
+          test -f src/lua/lundump.c
+
+          echo "Sketch and Lua source files found."
+
+      - name: Prepare Arduino Sketch
         run: |
+          set -eu
+
           mkdir -p ./sketch ./artifact
           cp ./sketch.ino ./sketch/sketch.ino
 
-          # Copy the embedded Lua interpreter sources, if present.
-          if [ -d ./src ]; then
-            cp -r ./src ./sketch/src
-          fi
+          mkdir -p ./sketch/src/lua
+          cp -r ./src/lua/. ./sketch/src/lua/
 
-      - name: Compile for Raspberry Pi Pico W
+          # These are desktop command-line programs, not VM sources.
+          rm -f ./sketch/src/lua/lua.c
+          rm -f ./sketch/src/lua/luac.c
+
+          # The official Lua makefile is not needed by Arduino.
+          rm -f ./sketch/src/lua/Makefile
+
+          echo "Staged files:"
+          find ./sketch -maxdepth 3 -type f | sort
+
+      - name: Compile Pico W Firmware
         run: |
           arduino-cli compile \
             --fqbn rp2040:rp2040:rpipicow \
             --output-dir ./artifact \
             ./sketch
 
+      - name: Show Firmware Artifacts
+        run: |
           ls -lah ./artifact
+          test -n "$(find ./artifact -type f -print -quit)"
 
-      - name: Upload compiled firmware
+      - name: Upload Firmware
         uses: actions/upload-artifact@v4
         with:
           name: pico-w-lua-vm-firmware
           path: ./artifact/**
           if-no-files-found: error
+          retention-days: 14
