@@ -1,10 +1,12 @@
-name: Compile ESP32-S3 Arduino Sketch
+
+name: Compile Pico W Lua VM
 
 on:
   push:
-    branches: [ "main" ]
+    branches: ["main"]
   pull_request:
-    branches: [ "main" ]
+    branches: ["main"]
+  workflow_dispatch:
 
 jobs:
   build:
@@ -14,28 +16,46 @@ jobs:
       - name: Checkout Repository
         uses: actions/checkout@v4
 
-      - name: Install Raw Arduino CLI Global Binary
-        run: |
-          curl -fsSL https://raw.githubusercontent.com/arduino/arduino-cli/master/install.sh | sudo BINDIR=/usr/local/bin sh
+      - name: Install Arduino CLI
+        uses: arduino/setup-arduino-cli@v2
 
-      - name: Configure and Install ESP32 Core
+      - name: Configure Arduino CLI
         run: |
-          mkdir -p ~/.arduino15
           arduino-cli config init --overwrite
-          arduino-cli config set board_manager.additional_urls https://espressif.github.io/arduino-esp32/package_esp32_index.json
+          arduino-cli config set board_manager.additional_urls \
+            https://github.com/earlephilhower/arduino-pico/releases/download/global/package_rp2040_index.json
           arduino-cli core update-index
-          arduino-cli core install esp32:esp32
 
-      - name: Compile Sketch
+      - name: Install Raspberry Pi Pico Core
+        run: |
+          arduino-cli core install rp2040:rp2040
+
+      - name: Install SD Library
+        run: |
+          arduino-cli lib install SD
+
+      - name: Prepare Sketch
         run: |
           mkdir -p ./sketch ./artifact
           cp ./sketch.ino ./sketch/sketch.ino
-          arduino-cli compile --fqbn esp32:esp32:esp32s3 --output-dir ./artifact ./sketch
-          ls -la ./artifact
 
-      - name: Upload compiled binaries
+          # Copy the embedded Lua interpreter sources, if present.
+          if [ -d ./src ]; then
+            cp -r ./src ./sketch/src
+          fi
+
+      - name: Compile for Raspberry Pi Pico W
+        run: |
+          arduino-cli compile \
+            --fqbn rp2040:rp2040:rpipicow \
+            --output-dir ./artifact \
+            ./sketch
+
+          ls -lah ./artifact
+
+      - name: Upload compiled firmware
         uses: actions/upload-artifact@v4
         with:
-          name: esp32-build-output
+          name: pico-w-lua-vm-firmware
           path: ./artifact/**
           if-no-files-found: error
